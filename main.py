@@ -15,7 +15,7 @@ class GoonersCalculator:
         self.canvas.pack(fill="both", expand=True)
 
         self.expression = ""
-        self.tabs = {}
+        self.tabs = {}  # tab_name: expression
         self.current_tab = None
         self.selected_theme = tk.StringVar()
         self.border_img = None
@@ -29,6 +29,7 @@ class GoonersCalculator:
     def create_tab_bar(self):
         self.tab_frame = tk.Frame(self.root)
         self.canvas.create_window(150, 20, window=self.tab_frame)
+
         self.new_tab_btn = tk.Button(
             self.tab_frame, text="+ New Tab", command=self.add_new_tab, width=10
         )
@@ -49,11 +50,14 @@ class GoonersCalculator:
             tab_btn = tk.Button(frame, text=tab, width=7)
             tab_btn.pack(side="left")
 
-            # Left click for drag+drop + switch
+            # Left-click drag setup
             tab_btn.bind("<ButtonPress-1>", lambda e, t=tab: self.start_drag(t))
             tab_btn.bind("<ButtonRelease-1>", lambda e, t=tab: self.end_drag(t))
 
-            # Right click for rename
+            # Normal left click to switch
+            tab_btn.bind("<Button-1>", lambda e, t=tab: self.switch_tab(t))
+
+            # Right click to rename
             tab_btn.bind(
                 "<Button-3>", lambda e, t=tab, b=tab_btn: self.rename_tab(t, b)
             )
@@ -78,19 +82,21 @@ class GoonersCalculator:
         if not source_tab or source_tab == target_tab_name:
             return
 
-        tabs_list = list(self.tabs.items())
-        source_idx = next(i for i, (k, _) in enumerate(tabs_list) if k == source_tab)
+        tab_items = list(self.tabs.items())
+        source_idx = next(i for i, (k, _) in enumerate(tab_items) if k == source_tab)
         target_idx = next(
-            i for i, (k, _) in enumerate(tabs_list) if k == target_tab_name
+            i for i, (k, _) in enumerate(tab_items) if k == target_tab_name
         )
 
-        moved = tabs_list.pop(source_idx)
-        tabs_list.insert(target_idx, moved)
-        self.tabs = dict(tabs_list)
+        moved = tab_items.pop(source_idx)
+        tab_items.insert(target_idx, moved)
+
+        self.tabs = dict(tab_items)
 
         if self.current_tab == source_tab:
             self.current_tab = source_tab
 
+        print(f"Moved '{source_tab}' to position {target_idx}")
         self.refresh_tab_buttons()
         self.drag_data["tab"] = None
 
@@ -137,11 +143,15 @@ class GoonersCalculator:
 
     def switch_tab(self, tab_name):
         if self.current_tab:
+            # Save current expression before switching
             self.tabs[self.current_tab] = self.expression
+
         self.current_tab = tab_name
         self.expression = self.tabs[tab_name]
         self.display.delete(0, tk.END)
         self.display.insert(tk.END, self.expression)
+
+        print(f"Switched to tab: {tab_name}")
 
     def create_widgets(self):
         self.display = tk.Entry(
@@ -179,7 +189,6 @@ class GoonersCalculator:
             )
             self.canvas.create_window(x, y, window=btn)
 
-        # Theme selector
         themes = [f for f in os.listdir("themes") if f.endswith(".png")]
         if themes:
             self.selected_theme.set(themes[0])
@@ -188,7 +197,6 @@ class GoonersCalculator:
             )
             self.canvas.create_window(150, 350, window=dropdown, width=180)
 
-        # Save/Load buttons
         save_btn = tk.Button(self.root, text="💾 Save Tabs", command=self.save_tabs)
         load_btn = tk.Button(self.root, text="📂 Load Tabs", command=self.load_tabs)
         self.canvas.create_window(80, 400, window=save_btn, width=100)
