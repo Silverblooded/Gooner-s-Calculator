@@ -26,7 +26,8 @@ class GoonersCalculator:
         self.border_path = None
         self.original_border_img = None
 
-        self.drag_data = {"tab": None, "hover_tab": None}
+        self.keypad_visible = True
+        self.button_frame = None
 
         self.create_widgets()
         self.create_tab_bar()
@@ -69,11 +70,21 @@ class GoonersCalculator:
         )
         self.new_tab_btn.pack(side="left", padx=2)
 
+        self.toggle_keypad_btn = tk.Button(
+            self.tab_bar_frame,
+            text="⌨️",
+            command=self.toggle_keypad,
+            bg=self.button_bg,
+            fg=self.fg_color,
+            width=2,
+        )
+        self.toggle_keypad_btn.pack(side="left", padx=4)
+
         self.tab_buttons = []
 
     def refresh_tab_buttons(self):
         for widget in self.tab_bar_frame.winfo_children():
-            if widget != self.new_tab_btn:
+            if widget not in (self.new_tab_btn, self.toggle_keypad_btn):
                 widget.destroy()
 
         self.tab_buttons.clear()
@@ -82,15 +93,37 @@ class GoonersCalculator:
             frame = tk.Frame(self.tab_bar_frame, bg=self.bg_color)
             frame.pack(side="left", padx=2)
 
-            tab_btn = tk.Button(
-                frame, text=tab, width=7, bg=self.button_bg, fg=self.fg_color
+            tab_var = tk.StringVar(value=tab)
+            entry = tk.Entry(
+                frame,
+                textvariable=tab_var,
+                width=7,
+                bg=self.entry_bg,
+                fg=self.fg_color,
+                relief="flat",
+                justify="center",
             )
-            tab_btn.pack(side="left")
+            entry.pack(side="left")
 
-            tab_btn.bind("<Button-1>", lambda e, t=tab: self.switch_tab(t))
-            tab_btn.bind(
-                "<Button-3>", lambda e, t=tab, b=tab_btn: self.rename_tab(t, b)
-            )
+            def rename_callback(event=None, var=tab_var, old_name=tab):
+                new_name = var.get().strip()
+                if (
+                    new_name
+                    and new_name != old_name
+                    and new_name not in self.tabs
+                    and len(new_name) <= 15
+                    and new_name.isalnum()
+                ):
+                    self.tabs[new_name] = self.tabs.pop(old_name)
+                    if self.current_tab == old_name:
+                        self.current_tab = new_name
+                    self.refresh_tab_buttons()
+                else:
+                    var.set(old_name)  # Revert
+
+            entry.bind("<FocusOut>", rename_callback)
+            entry.bind("<Return>", rename_callback)
+            entry.bind("<Button-1>", lambda e, t=tab: self.switch_tab(t))
 
             if len(self.tabs) > 1:
                 close_btn = tk.Button(
@@ -105,28 +138,13 @@ class GoonersCalculator:
 
             self.tab_buttons.append(frame)
 
-    def rename_tab(self, tab_name, button_widget):
-        entry = tk.Entry(
-            self.tab_bar_frame, width=10, bg=self.entry_bg, fg=self.fg_color
-        )
-        entry.insert(0, tab_name)
-        entry.select_range(0, tk.END)
-
-        def apply_rename(event=None):
-            new_name = entry.get().strip()
-            if new_name and new_name != tab_name and new_name not in self.tabs:
-                self.tabs[new_name] = self.tabs.pop(tab_name)
-                if self.current_tab == tab_name:
-                    self.current_tab = new_name
-            entry.destroy()
-            self.refresh_tab_buttons()
-
-        entry.bind("<Return>", apply_rename)
-        entry.focus_set()
-
-        bx = button_widget.winfo_rootx() - self.root.winfo_rootx()
-        by = button_widget.winfo_rooty() - self.root.winfo_rooty()
-        entry.place(x=bx, y=by + 30)
+    def toggle_keypad(self):
+        self.keypad_visible = not self.keypad_visible
+        if self.button_frame:
+            if self.keypad_visible:
+                self.button_frame.pack()
+            else:
+                self.button_frame.pack_forget()
 
     def add_new_tab(self):
         i = 1
@@ -176,8 +194,8 @@ class GoonersCalculator:
         self.display.bind("<Return>", self.evaluate_expression)
         self.display.bind("=", self.evaluate_expression)
 
-        btn_frame = tk.Frame(self.root, bg=self.bg_color)
-        btn_frame.pack()
+        self.button_frame = tk.Frame(self.root, bg=self.bg_color)
+        self.button_frame.pack()
 
         buttons = [
             ("7", 0, 0),
@@ -200,7 +218,7 @@ class GoonersCalculator:
 
         for text, r, c in buttons:
             btn = tk.Button(
-                btn_frame,
+                self.button_frame,
                 text=text,
                 width=4,
                 height=1,
