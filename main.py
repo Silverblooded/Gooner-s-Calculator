@@ -15,11 +15,12 @@ class GoonersCalculator:
         self.canvas.pack(fill="both", expand=True)
 
         self.expression = ""
-        self.tabs = {}  # tab_name: expression
+        self.tabs = {}
         self.current_tab = None
         self.selected_theme = tk.StringVar()
         self.border_img = None
-        self.drag_data = {"tab": None}
+
+        self.drag_data = {"tab": None, "hover_tab": None, "label": None}
 
         self.create_tab_bar()
         self.create_widgets()
@@ -34,33 +35,26 @@ class GoonersCalculator:
             self.tab_frame, text="+ New Tab", command=self.add_new_tab, width=10
         )
         self.new_tab_btn.pack(side="left", padx=2)
+
         self.tab_buttons = []
 
     def refresh_tab_buttons(self):
+        self.drag_data = {"tab": None, "hover_tab": None, "label": None}
+
         for widget in self.tab_frame.winfo_children():
             if widget != self.new_tab_btn:
                 widget.destroy()
 
         self.tab_buttons.clear()
 
-        for tab in self.tabs.keys():
+        for tab in self.tabs:
             frame = tk.Frame(self.tab_frame)
             frame.pack(side="left", padx=2)
 
             tab_btn = tk.Button(frame, text=tab, width=7)
             tab_btn.pack(side="left")
 
-            # Left-click drag setup
-            tab_btn.bind("<ButtonPress-1>", lambda e, t=tab: self.start_drag(t))
-            tab_btn.bind("<ButtonRelease-1>", lambda e, t=tab: self.end_drag(t))
-
-            # Normal left click to switch
-            tab_btn.bind("<Button-1>", lambda e, t=tab: self.switch_tab(t))
-
-            # Right click to rename
-            tab_btn.bind(
-                "<Button-3>", lambda e, t=tab, b=tab_btn: self.rename_tab(t, b)
-            )
+            self.bind_tab_events(tab_btn, tab)
 
             if len(self.tabs) > 1:
                 close_btn = tk.Button(
@@ -74,84 +68,67 @@ class GoonersCalculator:
 
             self.tab_buttons.append(frame)
 
-    def start_drag(self, tab_name):
-        self.drag_data["tab"] = tab_name
+    def bind_tab_events(self, tab_btn, tab_name):
+        normal_color = tab_btn.cget("bg")
 
-    def end_drag(self, target_tab_name):
-        source_tab = self.drag_data.get("tab")
-        if not source_tab or source_tab == target_tab_name:
-            return
+        def on_press(e):
+            print(f"[DRAG START] {tab_name}")
+            self.drag_data["tab"] = tab_name
 
-        tab_items = list(self.tabs.items())
-        source_idx = next(i for i, (k, _) in enumerate(tab_items) if k == source_tab)
-        target_idx = next(
-            i for i, (k, _) in enumerate(tab_items) if k == target_tab_name
-        )
+            label = tk.Label(self.root, text=tab_name, bg="yellow")
+            self.drag_data["label"] = label
+            label.place(x=e.x_root - 50, y=e.y_root - 20)
 
-        moved = tab_items.pop(source_idx)
-        tab_items.insert(target_idx, moved)
+        def on_motion(e):
+            if self.drag_data["label"]:
+                self.drag_data["label"].place(x=e.x_root - 50, y=e.y_root - 20)
 
-        self.tabs = dict(tab_items)
+        def on_release(e):
+            drop_target = self.drag_data.get("hover_tab")
+            dragged = self.drag_data.get("tab")
+            print(f"[DROP] {dragged} on {drop_target}")
 
-        if self.current_tab == source_tab:
-            self.current_tab = source_tab
+            if self.drag_data["label"]:
+                self.drag_data["label"].destroy()
 
-        print(f"Moved '{source_tab}' to position {target_idx}")
-        self.refresh_tab_buttons()
-        self.drag_data["tab"] = None
+            if dragged and drop_target and dragged != drop_target:
+                tabs_list = list(self.tabs.items())
+                drag_index = next(
+                    i for i, (k, _) in enumerate(tabs_list) if k == dragged
+                )
+                drop_index = next(
+                    i for i, (k, _) in enumerate(tabs_list) if k == drop_target
+                )
+                moved_item = tabs_list.pop(drag_index)
+                tabs_list.insert(drop_index, moved_item)
+                self.tabs = dict(tabs_list)
 
-    def add_new_tab(self):
-        i = 1
-        while f"Tab {i}" in self.tabs:
-            i += 1
-        tab_name = f"Tab {i}"
-        self.tabs[tab_name] = ""
-        self.refresh_tab_buttons()
-        self.switch_tab(tab_name)
+                if self.current_tab == dragged:
+                    self.current_tab = dragged
 
-    def delete_tab(self, tab_name):
-        if len(self.tabs) <= 1:
-            return
+                self.refresh_tab_buttons()
 
-        del self.tabs[tab_name]
+            self.drag_data = {"tab": None, "hover_tab": None, "label": None}
 
-        if self.current_tab == tab_name:
-            self.current_tab = list(self.tabs.keys())[0]
-            self.expression = self.tabs[self.current_tab]
-            self.display.delete(0, tk.END)
-            self.display.insert(tk.END, self.expression)
+        def on_hover_enter(e):
+            if self.drag_data["tab"] and tab_name != self.drag_data["tab"]:
+                self.drag_data["hover_tab"] = tab_name
+                tab_btn.config(bg="orange")
 
-        self.refresh_tab_buttons()
+        def on_hover_leave(e):
+            if self.drag_data["tab"] and self.drag_data["hover_tab"] == tab_name:
+                self.drag_data["hover_tab"] = None
+                tab_btn.config(bg=normal_color)
 
-    def rename_tab(self, tab_name, button_widget):
-        entry = tk.Entry(self.tab_frame, width=10)
-        entry.insert(0, tab_name)
-        entry.select_range(0, tk.END)
-        entry.place(x=button_widget.winfo_x(), y=button_widget.winfo_y())
+        def on_click(e):
+            self.switch_tab(tab_name)
 
-        def apply_rename(event=None):
-            new_name = entry.get().strip()
-            if new_name and new_name != tab_name and new_name not in self.tabs:
-                self.tabs[new_name] = self.tabs.pop(tab_name)
-                if self.current_tab == tab_name:
-                    self.current_tab = new_name
-            entry.destroy()
-            self.refresh_tab_buttons()
-
-        entry.bind("<Return>", apply_rename)
-        entry.focus_set()
-
-    def switch_tab(self, tab_name):
-        if self.current_tab:
-            # Save current expression before switching
-            self.tabs[self.current_tab] = self.expression
-
-        self.current_tab = tab_name
-        self.expression = self.tabs[tab_name]
-        self.display.delete(0, tk.END)
-        self.display.insert(tk.END, self.expression)
-
-        print(f"Switched to tab: {tab_name}")
+        tab_btn.bind("<Button-1>", on_click)
+        tab_btn.bind("<ButtonPress-3>", on_press)  # Right click starts drag
+        tab_btn.bind("<B3-Motion>", on_motion)
+        tab_btn.bind("<ButtonRelease-3>", on_release)
+        tab_btn.bind("<Enter>", on_hover_enter)
+        tab_btn.bind("<Leave>", on_hover_leave)
 
     def create_widgets(self):
         self.display = tk.Entry(
@@ -197,15 +174,16 @@ class GoonersCalculator:
             )
             self.canvas.create_window(150, 350, window=dropdown, width=180)
 
-        save_btn = tk.Button(self.root, text="💾 Save Tabs", command=self.save_tabs)
-        load_btn = tk.Button(self.root, text="📂 Load Tabs", command=self.load_tabs)
+        save_btn = tk.Button(self.root, text="📂 Save Tabs", command=self.save_tabs)
+        load_btn = tk.Button(self.root, text="📁 Load Tabs", command=self.load_tabs)
         self.canvas.create_window(80, 400, window=save_btn, width=100)
         self.canvas.create_window(220, 400, window=load_btn, width=100)
 
     def load_border_image(self, filename):
         path = os.path.join("themes", filename)
         if os.path.exists(path):
-            img = Image.open(path).resize((300, 450))
+            img = Image.open(path)
+            img = img.resize((300, 450))
             self.border_img = ImageTk.PhotoImage(img)
             self.canvas.create_image(0, 0, image=self.border_img, anchor="nw")
 
@@ -225,10 +203,40 @@ class GoonersCalculator:
         self.display.delete(0, tk.END)
         self.display.insert(tk.END, self.expression)
 
+    def add_new_tab(self):
+        i = 1
+        while f"Tab {i}" in self.tabs:
+            i += 1
+        tab_name = f"Tab {i}"
+        self.tabs[tab_name] = ""
+        self.refresh_tab_buttons()
+        self.switch_tab(tab_name)
+
+    def delete_tab(self, tab_name):
+        if len(self.tabs) <= 1:
+            return
+        del self.tabs[tab_name]
+        if self.current_tab == tab_name:
+            self.current_tab = list(self.tabs.keys())[0]
+            self.expression = self.tabs[self.current_tab]
+            self.display.delete(0, tk.END)
+            self.display.insert(tk.END, self.expression)
+        self.refresh_tab_buttons()
+
+    def switch_tab(self, tab_name):
+        if self.current_tab:
+            self.tabs[self.current_tab] = self.expression
+        self.current_tab = tab_name
+        self.expression = self.tabs[tab_name]
+        self.display.delete(0, tk.END)
+        self.display.insert(tk.END, self.expression)
+        print(f"Switched to tab: {tab_name}")
+
     def save_tabs(self):
         try:
             with open("tabs.json", "w") as f:
                 json.dump({"tabs": self.tabs, "current_tab": self.current_tab}, f)
+            print("Tabs saved.")
         except Exception as e:
             print("Save failed:", e)
 
@@ -237,14 +245,15 @@ class GoonersCalculator:
             with open("tabs.json", "r") as f:
                 data = json.load(f)
                 self.tabs = data.get("tabs", {})
-                self.current_tab = data.get("current_tab", next(iter(self.tabs), None))
-
+                self.current_tab = data.get(
+                    "current_tab", list(self.tabs.keys())[0] if self.tabs else None
+                )
                 if self.current_tab:
                     self.expression = self.tabs[self.current_tab]
                     self.display.delete(0, tk.END)
                     self.display.insert(tk.END, self.expression)
-
                 self.refresh_tab_buttons()
+            print("Tabs loaded.")
         except Exception as e:
             print("Load failed:", e)
 
