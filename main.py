@@ -9,52 +9,88 @@ class GoonersCalculator:
         self.root = root
         self.root.title("Gooner's Calculator")
         self.root.geometry("300x450")
-        self.root.configure(bg="#1e1e1e")
 
-        self.canvas = tk.Canvas(self.root, width=300, height=450)
-        self.canvas.pack(fill="both", expand=True)
+        self.theme_mode = "dark"  # Default to dark mode
+        self.load_ui_theme()
+
+        self.bg_canvas = tk.Canvas(
+            self.root, width=300, height=450, highlightthickness=0
+        )
+        self.bg_canvas.place(x=0, y=0, relwidth=1, relheight=1)
 
         self.expression = ""
-        self.tabs = {}
+        self.tabs = {}  # {tab_name: expression}
         self.current_tab = None
         self.selected_theme = tk.StringVar()
         self.border_img = None
+        self.border_path = None
+        self.original_border_img = None
 
-        self.drag_data = {"tab": None, "hover_tab": None, "label": None}
+        self.drag_data = {"tab": None, "hover_tab": None}
 
-        self.create_tab_bar()
         self.create_widgets()
-        self.load_border_image("default_border.png")
+        self.create_tab_bar()
+        self.load_theme_persistence()
         self.add_new_tab()
 
+        self.root.bind("<Return>", self.evaluate_expression)  # Keyboard input support
+        self.root.bind("=", self.evaluate_expression)  # Support = key as Enter
+
     def create_tab_bar(self):
-        self.tab_frame = tk.Frame(self.root)
-        self.canvas.create_window(150, 20, window=self.tab_frame)
+        self.tab_bar_canvas = tk.Canvas(
+            self.root, height=30, bg=self.bg_color, highlightthickness=0
+        )
+        self.tab_bar_frame = tk.Frame(self.tab_bar_canvas, bg=self.bg_color)
+        self.tab_scroll = tk.Scrollbar(
+            self.root, orient="horizontal", command=self.tab_bar_canvas.xview
+        )
+
+        self.tab_bar_canvas.configure(xscrollcommand=self.tab_scroll.set)
+        self.tab_bar_canvas.create_window(
+            (0, 0), window=self.tab_bar_frame, anchor="nw"
+        )
+        self.tab_bar_frame.bind(
+            "<Configure>",
+            lambda e: self.tab_bar_canvas.configure(
+                scrollregion=self.tab_bar_canvas.bbox("all")
+            ),
+        )
+
+        self.tab_bar_canvas.pack(fill="x")
+        self.tab_scroll.pack(fill="x")
 
         self.new_tab_btn = tk.Button(
-            self.tab_frame, text="+ New Tab", command=self.add_new_tab, width=10
+            self.tab_bar_frame,
+            text="+ New Tab",
+            command=self.add_new_tab,
+            width=10,
+            bg=self.button_bg,
+            fg=self.fg_color,
         )
         self.new_tab_btn.pack(side="left", padx=2)
 
         self.tab_buttons = []
 
     def refresh_tab_buttons(self):
-        self.drag_data = {"tab": None, "hover_tab": None, "label": None}
-
-        for widget in self.tab_frame.winfo_children():
+        for widget in self.tab_bar_frame.winfo_children():
             if widget != self.new_tab_btn:
                 widget.destroy()
 
         self.tab_buttons.clear()
 
         for tab in self.tabs:
-            frame = tk.Frame(self.tab_frame)
+            frame = tk.Frame(self.tab_bar_frame, bg=self.bg_color)
             frame.pack(side="left", padx=2)
 
-            tab_btn = tk.Button(frame, text=tab, width=7)
+            tab_btn = tk.Button(
+                frame, text=tab, width=7, bg=self.button_bg, fg=self.fg_color
+            )
             tab_btn.pack(side="left")
 
-            self.bind_tab_events(tab_btn, tab)
+            tab_btn.bind("<Button-1>", lambda e, t=tab: self.switch_tab(t))
+            tab_btn.bind(
+                "<Button-3>", lambda e, t=tab, b=tab_btn: self.rename_tab(t, b)
+            )
 
             if len(self.tabs) > 1:
                 close_btn = tk.Button(
@@ -63,145 +99,34 @@ class GoonersCalculator:
                     command=lambda t=tab: self.delete_tab(t),
                     width=2,
                     fg="red",
+                    bg=self.button_bg,
                 )
                 close_btn.pack(side="left")
 
             self.tab_buttons.append(frame)
 
-    def bind_tab_events(self, tab_btn, tab_name):
-        normal_color = tab_btn.cget("bg")
-
-        def on_press(e):
-            print(f"[DRAG START] {tab_name}")
-            self.drag_data["tab"] = tab_name
-
-            label = tk.Label(self.root, text=tab_name, bg="yellow")
-            self.drag_data["label"] = label
-            label.place(x=e.x_root - 50, y=e.y_root - 20)
-
-        def on_motion(e):
-            if self.drag_data["label"]:
-                self.drag_data["label"].place(x=e.x_root - 50, y=e.y_root - 20)
-
-        def on_release(e):
-            drop_target = self.drag_data.get("hover_tab")
-            dragged = self.drag_data.get("tab")
-            print(f"[DROP] {dragged} on {drop_target}")
-
-            if self.drag_data["label"]:
-                self.drag_data["label"].destroy()
-
-            if dragged and drop_target and dragged != drop_target:
-                tabs_list = list(self.tabs.items())
-                drag_index = next(
-                    i for i, (k, _) in enumerate(tabs_list) if k == dragged
-                )
-                drop_index = next(
-                    i for i, (k, _) in enumerate(tabs_list) if k == drop_target
-                )
-                moved_item = tabs_list.pop(drag_index)
-                tabs_list.insert(drop_index, moved_item)
-                self.tabs = dict(tabs_list)
-
-                if self.current_tab == dragged:
-                    self.current_tab = dragged
-
-                self.refresh_tab_buttons()
-
-            self.drag_data = {"tab": None, "hover_tab": None, "label": None}
-
-        def on_hover_enter(e):
-            if self.drag_data["tab"] and tab_name != self.drag_data["tab"]:
-                self.drag_data["hover_tab"] = tab_name
-                tab_btn.config(bg="orange")
-
-        def on_hover_leave(e):
-            if self.drag_data["tab"] and self.drag_data["hover_tab"] == tab_name:
-                self.drag_data["hover_tab"] = None
-                tab_btn.config(bg=normal_color)
-
-        def on_click(e):
-            self.switch_tab(tab_name)
-
-        tab_btn.bind("<Button-1>", on_click)
-        tab_btn.bind("<ButtonPress-3>", on_press)  # Right click starts drag
-        tab_btn.bind("<B3-Motion>", on_motion)
-        tab_btn.bind("<ButtonRelease-3>", on_release)
-        tab_btn.bind("<Enter>", on_hover_enter)
-        tab_btn.bind("<Leave>", on_hover_leave)
-
-    def create_widgets(self):
-        self.display = tk.Entry(
-            self.root, font=("Consolas", 20), bd=5, relief=tk.RIDGE, justify="right"
+    def rename_tab(self, tab_name, button_widget):
+        entry = tk.Entry(
+            self.tab_bar_frame, width=10, bg=self.entry_bg, fg=self.fg_color
         )
-        self.canvas.create_window(150, 70, window=self.display, width=260, height=40)
+        entry.insert(0, tab_name)
+        entry.select_range(0, tk.END)
 
-        buttons = [
-            ("7", 100, 130),
-            ("8", 150, 130),
-            ("9", 200, 130),
-            ("/", 250, 130),
-            ("4", 100, 180),
-            ("5", 150, 180),
-            ("6", 200, 180),
-            ("*", 250, 180),
-            ("1", 100, 230),
-            ("2", 150, 230),
-            ("3", 200, 230),
-            ("-", 250, 230),
-            ("C", 100, 280),
-            ("0", 150, 280),
-            ("=", 200, 280),
-            ("+", 250, 280),
-        ]
+        def apply_rename(event=None):
+            new_name = entry.get().strip()
+            if new_name and new_name != tab_name and new_name not in self.tabs:
+                self.tabs[new_name] = self.tabs.pop(tab_name)
+                if self.current_tab == tab_name:
+                    self.current_tab = new_name
+            entry.destroy()
+            self.refresh_tab_buttons()
 
-        for text, x, y in buttons:
-            btn = tk.Button(
-                self.root,
-                text=text,
-                width=4,
-                height=1,
-                font=("Arial", 14),
-                command=lambda t=text: self.on_click(t),
-            )
-            self.canvas.create_window(x, y, window=btn)
+        entry.bind("<Return>", apply_rename)
+        entry.focus_set()
 
-        themes = [f for f in os.listdir("themes") if f.endswith(".png")]
-        if themes:
-            self.selected_theme.set(themes[0])
-            dropdown = tk.OptionMenu(
-                self.root, self.selected_theme, *themes, command=self.change_theme
-            )
-            self.canvas.create_window(150, 350, window=dropdown, width=180)
-
-        save_btn = tk.Button(self.root, text="📂 Save Tabs", command=self.save_tabs)
-        load_btn = tk.Button(self.root, text="📁 Load Tabs", command=self.load_tabs)
-        self.canvas.create_window(80, 400, window=save_btn, width=100)
-        self.canvas.create_window(220, 400, window=load_btn, width=100)
-
-    def load_border_image(self, filename):
-        path = os.path.join("themes", filename)
-        if os.path.exists(path):
-            img = Image.open(path)
-            img = img.resize((300, 450))
-            self.border_img = ImageTk.PhotoImage(img)
-            self.canvas.create_image(0, 0, image=self.border_img, anchor="nw")
-
-    def change_theme(self, filename):
-        self.load_border_image(filename)
-
-    def on_click(self, char):
-        if char == "C":
-            self.expression = ""
-        elif char == "=":
-            try:
-                self.expression = str(eval(self.expression))
-            except Exception:
-                self.expression = "Error"
-        else:
-            self.expression += char
-        self.display.delete(0, tk.END)
-        self.display.insert(tk.END, self.expression)
+        bx = button_widget.winfo_rootx() - self.root.winfo_rootx()
+        by = button_widget.winfo_rooty() - self.root.winfo_rooty()
+        entry.place(x=bx, y=by + 30)
 
     def add_new_tab(self):
         i = 1
@@ -215,22 +140,216 @@ class GoonersCalculator:
     def delete_tab(self, tab_name):
         if len(self.tabs) <= 1:
             return
+
         del self.tabs[tab_name]
+
         if self.current_tab == tab_name:
             self.current_tab = list(self.tabs.keys())[0]
             self.expression = self.tabs[self.current_tab]
             self.display.delete(0, tk.END)
-            self.display.insert(tk.END, self.expression)
+            self.display.insert(0, self.expression)
+
         self.refresh_tab_buttons()
 
     def switch_tab(self, tab_name):
         if self.current_tab:
             self.tabs[self.current_tab] = self.expression
+
         self.current_tab = tab_name
         self.expression = self.tabs[tab_name]
         self.display.delete(0, tk.END)
-        self.display.insert(tk.END, self.expression)
+        self.display.insert(0, self.expression)
         print(f"Switched to tab: {tab_name}")
+
+    def create_widgets(self):
+        self.display = tk.Entry(
+            self.root,
+            font=("Consolas", 20),
+            bd=5,
+            relief=tk.RIDGE,
+            justify="right",
+            bg=self.entry_bg,
+            fg=self.fg_color,
+        )
+        self.display.pack(pady=(35, 5), padx=20, fill="x")
+
+        self.display.bind("<Return>", self.evaluate_expression)
+        self.display.bind("=", self.evaluate_expression)
+
+        btn_frame = tk.Frame(self.root, bg=self.bg_color)
+        btn_frame.pack()
+
+        buttons = [
+            ("7", 0, 0),
+            ("8", 0, 1),
+            ("9", 0, 2),
+            ("/", 0, 3),
+            ("4", 1, 0),
+            ("5", 1, 1),
+            ("6", 1, 2),
+            ("*", 1, 3),
+            ("1", 2, 0),
+            ("2", 2, 1),
+            ("3", 2, 2),
+            ("-", 2, 3),
+            ("C", 3, 0),
+            ("0", 3, 1),
+            ("=", 3, 2),
+            ("+", 3, 3),
+        ]
+
+        for text, r, c in buttons:
+            btn = tk.Button(
+                btn_frame,
+                text=text,
+                width=4,
+                height=1,
+                font=("Arial", 14),
+                command=lambda t=text: self.on_click(t),
+                bg=self.button_bg,
+                fg=self.fg_color,
+            )
+            btn.grid(row=r, column=c, padx=5, pady=5)
+
+        themes = [f for f in os.listdir("themes") if f.endswith(".png")]
+        if themes:
+            self.selected_theme.set(themes[0])
+            dropdown = tk.OptionMenu(
+                self.root, self.selected_theme, *themes, command=self.change_theme
+            )
+            dropdown.pack(pady=5)
+
+        controls = tk.Frame(self.root, bg=self.bg_color)
+        controls.pack(pady=5)
+        save_btn = tk.Button(
+            controls,
+            text="📂 Save Tabs",
+            command=self.save_tabs,
+            bg=self.button_bg,
+            fg=self.fg_color,
+        )
+        load_btn = tk.Button(
+            controls,
+            text="📂 Load Tabs",
+            command=self.load_tabs,
+            bg=self.button_bg,
+            fg=self.fg_color,
+        )
+        toggle_theme_btn = tk.Button(
+            controls,
+            text="🌓 Toggle Mode",
+            command=self.toggle_mode,
+            bg=self.button_bg,
+            fg=self.fg_color,
+        )
+        save_btn.pack(side="left", padx=10)
+        load_btn.pack(side="left", padx=10)
+        toggle_theme_btn.pack(side="left", padx=10)
+
+    def toggle_mode(self):
+        self.theme_mode = "light" if self.theme_mode == "dark" else "dark"
+        self.load_ui_theme()
+        self.refresh_ui_theme()
+        self.save_theme_persistence()
+
+    def load_ui_theme(self):
+        if self.theme_mode == "dark":
+            self.bg_color = "#1e1e1e"
+            self.fg_color = "white"
+            self.button_bg = "#333333"
+            self.entry_bg = "#222222"
+        else:
+            self.bg_color = "#f0f0f0"
+            self.fg_color = "black"
+            self.button_bg = "#dddddd"
+            self.entry_bg = "white"
+
+        self.root.configure(bg=self.bg_color)
+
+    def refresh_ui_theme(self):
+        for widget in self.root.winfo_children():
+            try:
+                widget.configure(bg=self.bg_color, fg=self.fg_color)
+            except:
+                pass
+        self.refresh_tab_buttons()
+        self.display.configure(bg=self.entry_bg, fg=self.fg_color)
+
+    def evaluate_expression(self, event=None):
+        try:
+            expression = self.display.get()
+            result = str(eval(expression))
+            self.display.delete(0, tk.END)
+            self.display.insert(0, result)
+            self.expression = result
+            self.tabs[self.current_tab] = result
+        except Exception as e:
+            self.display.delete(0, tk.END)
+            self.display.insert(0, "Error")
+            print(f"[Eval error]: {e}")
+
+    def load_border_image(self, filename):
+        path = os.path.join("themes", filename)
+        if os.path.exists(path):
+            self.border_path = path
+            self.original_border_img = Image.open(path)
+            self.redraw_border_image()
+            self.root.bind("<Configure>", lambda e: self.redraw_border_image())
+
+    def redraw_border_image(self):
+        if not self.original_border_img:
+            return
+
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        if width < 10 or height < 10:
+            return
+
+        resized_img = self.original_border_img.resize((width, height), Image.LANCZOS)
+        self.border_img = ImageTk.PhotoImage(resized_img)
+        self.bg_canvas.delete("bg")
+        self.bg_canvas.create_image(0, 0, image=self.border_img, anchor="nw", tags="bg")
+        self.bg_canvas.lower("bg")
+
+    def change_theme(self, filename):
+        self.selected_theme.set(filename)
+        self.load_border_image(filename)
+        self.save_theme_persistence()
+
+    def save_theme_persistence(self):
+        try:
+            with open("theme.json", "w") as f:
+                json.dump(
+                    {"theme": self.selected_theme.get(), "mode": self.theme_mode}, f
+                )
+        except Exception as e:
+            print("Failed to save theme:", e)
+
+    def load_theme_persistence(self):
+        try:
+            with open("theme.json", "r") as f:
+                data = json.load(f)
+                theme = data.get("theme")
+                mode = data.get("mode")
+                if theme:
+                    self.selected_theme.set(theme)
+                    self.load_border_image(theme)
+                if mode:
+                    self.theme_mode = mode
+                    self.load_ui_theme()
+        except Exception as e:
+            print("No saved theme found:", e)
+
+    def on_click(self, char):
+        if char == "C":
+            self.expression = ""
+        elif char == "=":
+            self.evaluate_expression()
+            return
+        else:
+            self.expression += char
+        self.display.delete(0, tk.END)
+        self.display.insert(tk.END, self.expression)
 
     def save_tabs(self):
         try:
@@ -251,7 +370,7 @@ class GoonersCalculator:
                 if self.current_tab:
                     self.expression = self.tabs[self.current_tab]
                     self.display.delete(0, tk.END)
-                    self.display.insert(tk.END, self.expression)
+                    self.display.insert(0, self.expression)
                 self.refresh_tab_buttons()
             print("Tabs loaded.")
         except Exception as e:
